@@ -53,6 +53,12 @@ class SyntaxErrorException(Exception):
         print(error_msg)
         sys.exit(1)
 
+def rotate_right(binary: str, rot: int):
+    if (len(binary) < 32):
+        binary = '0'*(32-len(binary)) + binary
+
+    return binary[32-rot:] + binary[:32-rot]
+
 '''
 #123    -> 123
 #0b1111 -> 15
@@ -69,21 +75,25 @@ def imm_to_operand2(literal: str) -> str:
     
     
     if (literal.startswith('#0x')):
-        res = bin(int(literal[3:], 16))
+        res = bin(int(literal[3:], 16))[2:]
     elif (literal.startswith('#0b')):
         res = literal[3:]
     elif (literal.startswith('#0')):
-        res = bin(int(literal[2:], 8))
+        res = bin(int(literal[2:], 8))[2:]
     else:
-        res = bin(int(literal[1:]))
+        res = bin(int(literal[1:]))[2:]
 
-    if (len(res.strip('0')) > 8):
+    
+    for i in range(0,32,2):
+        tmp = rotate_right(res, i).strip('0')
+        if len(tmp) <= 8: 
+            operand2 = f'{bin(i//2)[2:]:0>4}{tmp:0>8}'
+            break
+    else:
         raise SyntaxErrorException('Invalid Immediate Value')
     
-
-    #todo
     
-    return res
+    return operand2
 
 
 def data_processing(opcode, tokens: list) -> bool:
@@ -95,9 +105,10 @@ def data_processing(opcode, tokens: list) -> bool:
     except:
         pass
     
-    # mov, mvn : [opcode, Rd] + [Rm (, sh, #shift)]     or 
+    # mov, mvn : [opcode, Rd] + [imm]
+    #                           [Rm (, rrx)]            or
+    #                           [Rm (, sh, #shift)]     or 
     #                           [Rm (, sh, Rs)]         or 
-    #                           [imm]
     # else : [opcode, Rd, Rn] + [Rm, ...] (3 cases are same to mov family)
 
     tmp = tokens[0].replace(opcode, '')
@@ -122,8 +133,29 @@ def data_processing(opcode, tokens: list) -> bool:
         operand2 = imm_to_operand2(op2_tokens[0])
     else:
         I = '0'
+        Rm = op2_tokens[0]
 
+        if op2_tokens[1] == 'rrx':
+            operand2 = f'00000110{registers[Rm]}'
+
+        else:
+            shift_dict = {
+                'lsl' : '00',
+                'lsr' : '01',
+                'asr' : '10',
+                'ror' : '11'
+            }
+            shift_inst = op2_tokens[1] # lsl, lsr, asr, ror
+            shift = shift_dict[shift_inst]
+
+            if op2_tokens[2].startswith('#'):
+                operand2 = f'{bin(op2_tokens[2])[2:]}{shift}0{Rm}'
+
+            else:
+                operand2 = f'{registers[op2_tokens[2]]}0{shift}1{Rm}'
     
+
+    return inst_format['dp'].format(I=I, opcode=opcode, S=S, Rn=Rn, Rd=Rd, operand2=operand2)
 
     #todo 
 
