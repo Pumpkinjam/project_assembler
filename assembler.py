@@ -53,6 +53,39 @@ class SyntaxErrorException(Exception):
         print(error_msg)
         sys.exit(1)
 
+'''
+#123    -> 123
+#0b1111 -> 15
+#0xff   -> 255
+#024    -> 20
+
+also considering rot
+'''
+def imm_to_operand2(literal: str) -> str:
+
+    if literal[0] != '#':   # will not be happened. maybe...
+        print('expected \'#\' for immediate value.')
+        raise Exception()
+    
+    
+    if (literal.startswith('#0x')):
+        res = bin(int(literal[3:], 16))
+    elif (literal.startswith('#0b')):
+        res = literal[3:]
+    elif (literal.startswith('#0')):
+        res = bin(int(literal[2:], 8))
+    else:
+        res = bin(int(literal[1:]))
+
+    if (len(res.strip('0')) > 8):
+        raise SyntaxErrorException('Invalid Immediate Value')
+    
+
+    #todo
+    
+    return res
+
+
 def data_processing(opcode, tokens: list) -> bool:
 
     # remove ',' in the tokens
@@ -76,12 +109,21 @@ def data_processing(opcode, tokens: list) -> bool:
     Rd = registers[tokens[1]]
     if opcode in ('mov', 'mvn'):
         Rn = '0000'
-        operand2 = tokens[2:]
+        op2_tokens = tokens[2:]
     else:
         Rn = registers[tokens[2]]
-        operand2 = tokens[3:]
+        op2_tokens = tokens[3:]
 
-    I = '1' if operand2[0].startswith('#') else '0'
+    if (op2_tokens == []):
+        raise SyntaxErrorException('mov : missing operand')
+
+    if op2_tokens[0].startswith('#'):
+        I = '1'
+        operand2 = imm_to_operand2(op2_tokens[0])
+    else:
+        I = '0'
+
+    
 
     #todo 
 
