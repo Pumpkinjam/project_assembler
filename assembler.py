@@ -67,7 +67,11 @@ def data_processing(opcode, tokens: list) -> bool:
     #                           [imm]
     # else : [opcode, Rd, Rn] + [Rm, ...] (3 cases are same to mov family)
 
-    cond = cond_dict[tokens[0].replace(opcode, '')]
+    tmp = tokens[0].replace(opcode, '')
+    if tmp.endswith('s'):
+        S = '1'
+        tmp = tmp[:len(tmp)-1]
+    cond = cond_dict[tmp]
 
     Rd = registers[tokens[1]]
     if opcode in ('mov', 'mvn'):
@@ -77,7 +81,9 @@ def data_processing(opcode, tokens: list) -> bool:
         Rn = registers[tokens[2]]
         operand2 = tokens[3:]
 
-    I = '1' if 
+    I = '1' if operand2[0].startswith('#') else '0'
+
+    #todo 
 
 
 
