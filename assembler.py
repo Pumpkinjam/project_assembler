@@ -95,8 +95,15 @@ def imm_to_operand2(literal: str) -> str:
     
     return operand2
 
+def bin_to_hex(binary_code: str) -> str:
+    print(f'binary : {binary_code:0>32}')
 
-def data_processing(opcode, tokens: list) -> bool:
+    hex_code = hex(int(binary_code, 2))
+    print(f'hex : {hex_code}')
+
+    return hex_code
+
+def data_processing(opcode, tokens: list) -> str:
 
     # remove ',' in the tokens
     try:
@@ -104,83 +111,215 @@ def data_processing(opcode, tokens: list) -> bool:
             tokens.remove(',')
     except:
         pass
-    
-    # mov, mvn : [opcode, Rd] + [imm]
-    #                           [Rm (, rrx)]            or
-    #                           [Rm (, sh, #shift)]     or 
-    #                           [Rm (, sh, Rs)]         or 
-    # else : [opcode, Rd, Rn] + [Rm, ...] (3 cases are same to mov family)
 
     tmp = tokens[0].replace(opcode, '')
-    if tmp.endswith('s'):
-        S = '1'
-        tmp = tmp[:len(tmp)-1]
-    cond = cond_dict[tmp]
 
-    Rd = registers[tokens[1]]
-    if opcode in ('mov', 'mvn'):
-        Rn = '0000'
-        op2_tokens = tokens[2:]
-    else:
-        Rn = registers[tokens[2]]
-        op2_tokens = tokens[3:]
+    # special case : mrs
+    # mrs{<cond>} Rm, <cpsr|spsr>
+    if opcode == 'mrs':
+        cond = cond_dict[tmp]
+        Rm = tokens[1]
+        P = '0' if tokens[2] == 'cpsr' else '1' if tokens[2] == 'spsr' else '-'
+        if P == '-': raise SyntaxErrorException('neither cpsr nor spsr')
 
-    if (op2_tokens == []):
-        raise SyntaxErrorException('mov : missing operand')
-
-    if op2_tokens[0].startswith('#'):
-        I = '1'
-        operand2 = imm_to_operand2(op2_tokens[0])
-    else:
-        I = '0'
-        Rm = op2_tokens[0]
-
-        if op2_tokens[1] == 'rrx':
-            operand2 = f'00000110{registers[Rm]}'
-
-        else:
-            shift_dict = {
-                'lsl' : '00',
-                'lsr' : '01',
-                'asr' : '10',
-                'ror' : '11'
-            }
-            shift_inst = op2_tokens[1] # lsl, lsr, asr, ror
-            shift = shift_dict[shift_inst]
-
-            if op2_tokens[2].startswith('#'):
-                operand2 = f'{bin(op2_tokens[2])[2:]}{shift}0{Rm}'
-
-            else:
-                operand2 = f'{registers[op2_tokens[2]]}0{shift}1{Rm}'
+        binary_code = cond + f'00010{P}101001111100000000{Rm}'
     
+    # special case : msr
+    # msr{<cond>} <cpsr|spsr>_<fields>, Rm
+    # msr{<cond>} <cpsr|spsr>_<fields>, #imm
+    elif opcode == 'msr':
+        cond = cond_dict[tmp]
+        
+        if tokens[2].startswith('#'):
+            I = '1'
+            operand2 = imm_to_operand2(tokens[2])
+        else:
+            I = '0'
+            operand2 = '0' * 8 + tokens[2]
 
-    return inst_format['dp'].format(I=I, opcode=opcode, S=S, Rn=Rn, Rd=Rd, operand2=operand2)
+        psr = tokens[1]
 
-    #todo 
+        if psr.startswith('cpsr'):
+            P = '0'
+        elif psr.startswith('spsr'):
+            P = '1'
+        else:
+            raise SyntaxErrorException('neither cpsr nor spsr')
+        
+        field_str = psr[5:]
+        if field_str == '':
+            field = '1111'
+        else:
+            field = ''
+            field += '1' if 'f' in field_str else '0'
+            field += '1' if 's' in field_str else '0'
+            field += '1' if 'x' in field_str else '0'
+            field += '1' if 'c' in field_str else '0'
+        
+        binary_code = cond + f'00{I}10{P}10{field}1111{operand2}'
+
+    # mov, mvn, cmp, teq, tst : [opcode, Rd] + [imm]    or 
+    #                           [Rm (, rrx)]            or
+    #                           [Rm (, sh, #shift)]     or 
+    #                           [Rm (, sh, Rs)]
+    # else : [opcode, Rd, Rn] + [Rm, ...] (3 cases are same to mov family)
+    else:
+        S = '0'
+        if tmp.endswith('s'):
+            S = '1'
+            tmp = tmp[:len(tmp)-1]
+        cond = cond_dict[tmp]
+
+        Rd = registers[tokens[1]]
+        if opcode in ('mov', 'mvn', 'cmp', 'teq', 'tst'):
+            Rn = '0000'
+            op2_tokens = tokens[2:]
+        else:
+            Rn = registers[tokens[2]]
+            op2_tokens = tokens[3:]
 
 
+        if (op2_tokens == []):
+            raise SyntaxErrorException('mov : missing operand')
 
-def other_instructions() -> bool:
+        if op2_tokens[0].startswith('#'):
+            I = '1'
+            operand2 = imm_to_operand2(op2_tokens[0])
+        else:
+            I = '0'
+            Rm = registers[op2_tokens[0]]
+
+            if len(op2_tokens) == 1:
+                operand2 = f'00000000{Rm}'
+            else:
+                if op2_tokens[1] == 'rrx':
+                    operand2 = f'00000110{registers[Rm]}'
+
+                else:
+                    shift_dict = {
+                        'lsl' : '00',
+                        'lsr' : '01',
+                        'asr' : '10',
+                        'ror' : '11'
+                    }
+                    shift_inst = op2_tokens[1] # lsl, lsr, asr, ror
+                    shift = shift_dict[shift_inst]
+
+                    if op2_tokens[2].startswith('#'):
+                        operand2 = f'{bin(int(op2_tokens[2][1:]))[2:]}{shift}0{Rm}'
+
+                    else:
+                        operand2 = f'{registers[op2_tokens[2]]}0{shift}1{Rm}'
+
+        binary_code = cond + inst_format['dp'].format(I=I, opcode=opcode_dict[opcode], S=S, Rn=Rn, Rd=Rd, operand2=operand2)
+            
+    return bin_to_hex(binary_code)
+
+def msrmrs_processing(inst, toekns: list) -> str:
+    # remove ',' in the tokens
+    try:
+        while True:
+            print('asdf')
+            tokens.remove(',')
+    except:
+        pass
+
+    tmp = tokens[0].replace(inst, '')
+
+    # special case : mrs
+    # mrs{<cond>} Rm, <cpsr|spsr>
+    if inst == 'mrs':
+        cond = cond_dict[tmp]
+        Rm = registers[Rm]
+        P = '0' if tokens[2] == 'cpsr' else '1' if tokens[2] == 'spsr' else '-'
+        if P == '-': raise SyntaxErrorException('neither cpsr nor spsr')
+
+        binary_code = cond + f'00010{P}101001111100000000{Rm}'
+    
+    # special case : msr
+    # msr{<cond>} <cpsr|spsr>_<fields>, Rm
+    # msr{<cond>} <cpsr|spsr>_<fields>, #imm
+    elif inst == 'msr':
+        cond = cond_dict[tmp]
+        
+        if tokens[2].startswith('#'):
+            I = '1'
+            operand2 = imm_to_operand2(tokens[2])
+        else:
+            I = '0'
+            operand2 = '0' * 8 + registers[tokens[2]]
+
+        psr = tokens[1]
+
+        if psr.startswith('cpsr'):
+            P = '0'
+        elif psr.startswith('spsr'):
+            P = '1'
+        else:
+            raise SyntaxErrorException('neither cpsr nor spsr')
+        
+        field_str = psr[5:]
+        if field_str == '':
+            field = '1111'
+        else:
+            field = ''
+            field += '1' if 'f' in field_str else '0'
+            field += '1' if 's' in field_str else '0'
+            field += '1' if 'x' in field_str else '0'
+            field += '1' if 'c' in field_str else '0'
+        
+        binary_code = cond + f'00{I}10{P}10{field}1111{operand2}'
+
+    print('asdfasdf')
+    return bin_to_hex(binary_code)
+
+def other_instructions(inst, tokens: list) -> str:
     pass
+
+# not used. maybe..?
+def split(line: str, target: tuple) -> list:
+    res = []
+    last_idx = 0
+    for i in range(len(line)):
+        if line[i] in target:
+            res.append(line[last_idx:i])
+            res.append(line[i])
+            last_idx = i+1
+    
+    return res
+    
+def trim(tokens: list, target: tuple) -> list:
+    return [c for c in tokens if c not in target]
 
 
 ### main() starts here ###
     
-lines = sys.stdin.readlines()
+#lines = sys.stdin.readlines()
+lines = ('_start: .global _start',
+'mov r0, #1',
+'movlt r1, r0',
+'movs r2, r0, lsl #2',
+'mov r3, #4, lsl #5',
+'add r1, r2, r3',
+'rsb r2, r1, r0, lsl, r5',
+'eor r1, r1, r0',
+'subgt r2, r1, r0, ror, #5',
+'msr spsr_c, r0')
 splitter = re.compile(r'([ \t\n,])')
 
 line_number = 0
-
+   
 for line in lines:
     line_number += 1
 
     line = line.lower()
+    print(line)
     tokens = splitter.split(line)
     #print(tokens)
-    tokens = [tok for tok in tokens
-              if re.match('\s*$', tok) == None]
-    print(tokens)
+    #tokens = [tok for tok in tokens
+    #          if re.match('\s*$', tok) == None]
+    tokens = trim(tokens, ('', ' ', ',', '@')) # ex) ['add', 'r0', 'r1', 'r2', 'lsl', '#5']
+    #print(tokens)
 
 
     while len(tokens) > 0:
@@ -202,8 +341,13 @@ for line in lines:
             data_processing(target, tokens)
             break
     else:
-        if not other_instructions(instruction):
-            raise SyntaxErrorException('opcode not found', line_number)
+        if instruction in ('mrs', 'msr'):
+            msrmrs_processing(instruction, tokens)
+        else:
+            try:
+                other_instructions(instruction, tokens)
+            except:
+                raise SyntaxErrorException('instruction not found', line_number)
 
     
 
