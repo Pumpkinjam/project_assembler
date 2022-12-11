@@ -13,11 +13,11 @@ inst_format = {
     "ldrh_reg" : "000{P}{U}0{W}{L}{Rn}{Rd}00001{S}{H}1{Rm}",
     "ldmstm" : "100{P}{U}{S}{W}{L}{Rn}{reglist}",
     "b" : "101{L}{offset}",
-    "bx" : "000100101111111100000001{Rn}",
+    "bx" : "000100101111111100000001{Rn}",                      # not used. just be processed with "b"
     "swi" : "1111{swinum}",
     "swp" : "00010{B}00{Rn}{Rd}00001001{Rm}",
     "ldcsdc" : "110{P}{U}{N}{W}{L}{Rn}{CRd}{CPNum}{offset}",
-    "coproc" : "1110{op1}{CRn}{CRd}{CPNum}{op2}0{CRm}",
+    "coproc" : "1110{op1}{CRn}{CRd}{CPNum}{op2}0{CRm}",         # how..?
     "mrcmcr" : "1110{op1}{L}{CRn}{CRd}{CPNum}{op2}1{CRm}",
     "msr" : "00010{P}101001111100000000{Rm}",
     "mrs" : "00{I}10{P}10{field}1111{operand2}"
@@ -65,6 +65,29 @@ def rotate_left(binary: str, rot: int):
     return rotate_right(binary, 32-rot)
 
 '''
+imm_to_binary("#12", 0)     => '1100'
+imm_to_binary("#3", 1)      => '11'
+imm_to_binary("#0xff", 10)  => '0011111111'
+'''
+def imm_to_binary(literal: str, length: int = 0):
+    if literal[0] != '#':   # will not be happened. maybe...
+        print('expected \'#\' for immediate value.')
+        raise Exception()
+    
+    if (literal.startswith('#0x')):
+        res = f'{bin( int( literal[3:], 16))[2:]}'
+    elif (literal.startswith('#0b')):
+        res = literal[3:]
+    elif (literal.startswith('#0')):
+        res = f'{bin(int(literal[2:], 8))[2:]}'
+    else:
+        res = f'{bin(int(literal[1:]))[2:]}'
+
+    res = '0' * (length-len(res)) + res
+    
+    return res
+
+'''
 #123    -> 123
 #0b1111 -> 15
 #0xff   -> 255
@@ -74,19 +97,7 @@ also considering rot
 '''
 def imm_to_operand2(literal: str) -> str:
 
-    if literal[0] != '#':   # will not be happened. maybe...
-        print('expected \'#\' for immediate value.')
-        raise Exception()
-    
-    
-    if (literal.startswith('#0x')):
-        res = f'{bin( int( literal[3:], 16))[2:] :0>32}'
-    elif (literal.startswith('#0b')):
-        res = literal[3:]
-    elif (literal.startswith('#0')):
-        res = f'{bin(int(literal[2:], 8))[2:] :0>32}'
-    else:
-        res = f'{bin(int(literal[1:]))[2:] :0>32}'
+    res = imm_to_binary(literal, 32)
 
     for i in range(0,32,2):
         tmp = rotate_left(res, i).lstrip('0')
@@ -315,7 +326,134 @@ def msrmrs_processing(inst, toekns: list) -> str:
     return bin_to_hex(binary_code)
 
 def other_instructions(inst, tokens: list) -> str:
-    pass
+
+    # instruction starts with 'b', must be 'b' 'bl' 'bx' kinds of thing
+    # and these guys never has S flag
+    if inst.startswith('b'):
+        tmp = len(inst)
+        res = inst_format['b']
+
+        # just 'b'
+        if tmp==1:
+            cond = '1110'
+            L = '0'
+
+        # just 'bx' or 'bl'
+        elif tmp==2:
+            cond = '1110'
+            L = '1'
+
+        # b{cond}
+        elif tmp==3:
+            cond = cond_dict[inst[1:]]
+            inst = 'b'
+            L = '0'
+        
+        # bx{cond} or bl{cond}
+        elif tmp==4:
+            cond = cond_dict[inst[2:]]
+            inst = inst[:2]
+            L = '1'
+        
+        else:
+            raise SyntaxErrorException('Invalid mnemonic')
+
+        
+        if inst=='bx':
+            offset = f'00101111111100000001{registers[tokens[1]]}'
+        else:
+            offset = imm_to_binary(tokens[1], 24)
+
+        binary_code = cond + res.format(L=L, offset=offset)
+
+    # swp, no S flag
+    # swp{b}{cond} Rd, Rm, [Rn]
+    elif inst.startswith('swp'):
+        res = inst_format['swp']
+        bcon = inst[3:]
+        
+        B = '0'
+        cond = '1110'
+        
+        # cond never starts with 'b'
+        if bcon[0] == 'b':
+            B = '1'
+            bcon = bcon[1:]
+
+        if len(bcon) == 2:
+            cond = cond_dict[bcon]
+
+        Rd = registers[tokens[0]]
+        Rm = registers[tokens[1]]
+        Rn = registers[tokens[2][1:-1]] # remove bracket
+        
+        binary_code = cond + res.format(B=B, Rn=Rn, Rd=Rd, Rm=Rm)
+    
+    elif inst.startswith(''):
+        pass
+    # all cases which includes both S and cond
+    else:
+        S = '0'
+        cond = '1110'
+        
+        #todo : umullsgt is not tokenized by this
+        scon = inst[3:]
+        tmp = len(scon)
+
+        if tmp == 1:
+            S = '1'
+        elif tmp == 2:
+            cond = cond_dict[scon]
+        elif tmp == 3:
+            S = '1'
+            cond = cond_dict[scon[1:]]
+
+        # mul{cond}{S} Rd, Rm, Rs
+        # mla{cond}{S} Rd, Rm, Rs, Rn
+        if inst=='mul' or inst=='mla':
+            res = inst_format['mul']
+            
+            A = '1' if inst=='mla' else '0'
+
+            Rd = registers[tokens[1]]
+            Rm = registers[tokens[2]]
+            Rs = registers[tokens[3]]
+            try:
+                Rn = registers[tokens[4]]
+            except:
+                Rn = '0000'
+            
+            binary_code = cond + res.format(A=A, S=S, Rd=Rd, Rn=Rn, Rs=Rs, Rm=Rm)
+            
+
+        elif inst=='umull' or inst=='smull':
+            res = inst_format['mull']
+            
+
+        elif inst=='ldr' or inst=='str' or inst=='ldrb' or inst=='strb':
+            res = inst_format["ldrstr"]
+            pass
+
+        elif inst=='ldrh' or inst=='strh':
+            pass
+
+        elif inst=='ldm' or inst=='stm':
+            res = inst_format['ldmstm']
+
+        elif inst=='swi':
+            res = inst_format['swi']
+
+        elif inst=='ldc' or inst=='sdc':
+            res = inst_format['ldcsdc']
+
+        elif inst=='mrc' or inst=='mcr':
+            res = inst_format['mrcmcr']
+        
+        # mul, bx, swi, swp
+        else:
+            res = inst_format[inst]
+    
+    return bin_to_hex(binary_code)
 
 
 def split(line: str, target: tuple) -> list:
@@ -389,6 +527,7 @@ for line in lines:
         elif tokens[0].startswith('.'): # process directive
             print('\tDIRECTIVE ' + tokens[0] + ' FOUND')
             tokens = tokens[1:]
+            while len(tokens) > 0: del tokens[0]
             continue
         else: break # process instruction
     else: continue  # no instruction after, or an empty line
