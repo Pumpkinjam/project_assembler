@@ -59,6 +59,11 @@ def rotate_right(binary: str, rot: int):
 
     return binary[32-rot:] + binary[:32-rot]
 
+def rotate_left(binary: str, rot: int):
+    if (len(binary) < 32):
+        binary = f'{binary:0>32}'
+    return rotate_right(binary, 32-rot)
+
 '''
 #123    -> 123
 #0b1111 -> 15
@@ -75,18 +80,18 @@ def imm_to_operand2(literal: str) -> str:
     
     
     if (literal.startswith('#0x')):
-        res = bin(int(literal[3:], 16))[2:]
+        res = f'{bin( int( literal[3:], 16))[2:] :0>32}'
     elif (literal.startswith('#0b')):
         res = literal[3:]
     elif (literal.startswith('#0')):
-        res = bin(int(literal[2:], 8))[2:]
+        res = f'{bin(int(literal[2:], 8))[2:] :0>32}'
     else:
-        res = bin(int(literal[1:]))[2:]
+        res = f'{bin(int(literal[1:]))[2:] :0>32}'
 
-    
     for i in range(0,32,2):
-        tmp = rotate_right(res, i).strip('0')
-        if len(tmp) <= 8: 
+        tmp = rotate_left(res, i).lstrip('0')
+
+        if len(tmp) <= 8:
             operand2 = f'{bin(i//2)[2:]:0>4}{tmp:0>8}'
             break
     else:
@@ -95,10 +100,19 @@ def imm_to_operand2(literal: str) -> str:
     
     return operand2
 
+def bit4_to_hex(bits: str) -> str:
+    bits = f'{bits:0>4}'
+    if len(bits) != 4: raise Exception(f'Must receive just 4 bits. given string is {bits}')
+    return hex(int(bits, 2))[2:]
+
 def bin_to_hex(binary_code: str) -> str:
     print(f'binary : {binary_code:0>32}')
 
-    hex_code = hex(int(binary_code, 2))
+    hex_code = '0x'
+    for i in range(0, 32, 4):
+        tmp = binary_code[i:i+4]
+        hex_code += bit4_to_hex(tmp)
+
     print(f'hex : {hex_code}')
 
     return hex_code
@@ -158,42 +172,70 @@ def data_processing(opcode, tokens: list) -> str:
         
         binary_code = cond + f'00{I}10{P}10{field}1111{operand2}'
 
-    # mov, mvn, cmp, teq, tst : [opcode, Rd] + [imm]    or 
-    #                           [Rm (, rrx)]            or
-    #                           [Rm (, sh, #shift)]     or 
-    #                           [Rm (, sh, Rs)]
+    # mov, mvn, cmp, cmn, teq, tst: [opcode, Rd] + [imm]    or 
+    #                               [Rm (, rrx)]            or
+    #                               [Rm (, sh, #shift)]     or 
+    #                               [Rm (, sh, Rs)]
     # else : [opcode, Rd, Rn] + [Rm, ...] (3 cases are same to mov family)
     else:
+        l = len(tmp)
         S = '0'
-        if tmp.endswith('s'):
+        cond = '1110'
+
+        if l==0: pass
+        elif l==1:    # check s flag
+            if tmp=='s':
+                S = '1'
+            else: raise SyntaxErrorException('Invalid mnemonic')
+
+        elif l==2:  # check condition
+            if tmp in cond_dict:
+                cond = cond_dict[tmp]
+            else: raise SyntaxErrorException('Invalid mnemonic')
+
+        elif l==3:  # check both
+            if tmp[0] != 's' or tmp[1:] not in cond_dict: 
+                raise SyntaxErrorException('Invalid mnemonic')
             S = '1'
-            tmp = tmp[:len(tmp)-1]
-        cond = cond_dict[tmp]
+            cond = cond_dict[tmp[1:]]
+
+        else: raise SyntaxErrorException('Invalid mnemonic')
+
 
         Rd = registers[tokens[1]]
-        if opcode in ('mov', 'mvn', 'cmp', 'teq', 'tst'):
+        if opcode in ('cmp', 'cmn', 'teq', 'tst'):
+            S = '1'
+            Rn = Rd
+            Rd = '0000'
+            op2_tokens = tokens[2:]
+
+        elif opcode in ('mov', 'mvn'):
             Rn = '0000'
             op2_tokens = tokens[2:]
+
         else:
             Rn = registers[tokens[2]]
             op2_tokens = tokens[3:]
 
-
+        # no operand exception (missing Rm or imm)
         if (op2_tokens == []):
-            raise SyntaxErrorException('mov : missing operand')
+            raise SyntaxErrorException('missing operand')
 
+        # check immediate value
         if op2_tokens[0].startswith('#'):
             I = '1'
             operand2 = imm_to_operand2(op2_tokens[0])
+
         else:
             I = '0'
             Rm = registers[op2_tokens[0]]
 
-            if len(op2_tokens) == 1:
+            # case : no barrel shift
+            if len(op2_tokens) == 1: 
                 operand2 = f'00000000{Rm}'
             else:
                 if op2_tokens[1] == 'rrx':
-                    operand2 = f'00000110{registers[Rm]}'
+                    operand2 = f'00000110{Rm}'
 
                 else:
                     shift_dict = {
@@ -206,11 +248,12 @@ def data_processing(opcode, tokens: list) -> str:
                     shift = shift_dict[shift_inst]
 
                     if op2_tokens[2].startswith('#'):
-                        operand2 = f'{bin(int(op2_tokens[2][1:]))[2:]}{shift}0{Rm}'
+                        operand2 = f'{bin(int(op2_tokens[2][1:]))[2:]:0>5}{shift}0{Rm}'
 
                     else:
                         operand2 = f'{registers[op2_tokens[2]]}0{shift}1{Rm}'
 
+        print(f'I = {I} / opcode = {opcode} / S = {S} / Rn = {Rn} / Rd = {Rd} / operand2 = {operand2}')
         binary_code = cond + inst_format['dp'].format(I=I, opcode=opcode_dict[opcode], S=S, Rn=Rn, Rd=Rd, operand2=operand2)
             
     return bin_to_hex(binary_code)
@@ -219,7 +262,6 @@ def msrmrs_processing(inst, toekns: list) -> str:
     # remove ',' in the tokens
     try:
         while True:
-            print('asdf')
             tokens.remove(',')
     except:
         pass
@@ -270,21 +312,21 @@ def msrmrs_processing(inst, toekns: list) -> str:
         
         binary_code = cond + f'00{I}10{P}10{field}1111{operand2}'
 
-    print('asdfasdf')
     return bin_to_hex(binary_code)
 
 def other_instructions(inst, tokens: list) -> str:
     pass
 
-# not used. maybe..?
+
 def split(line: str, target: tuple) -> list:
     res = []
     last_idx = 0
     for i in range(len(line)):
         if line[i] in target:
             res.append(line[last_idx:i])
-            res.append(line[i])
+            #res.append(line[i])
             last_idx = i+1
+    res.append(line[last_idx:])
     
     return res
     
@@ -295,16 +337,32 @@ def trim(tokens: list, target: tuple) -> list:
 ### main() starts here ###
     
 #lines = sys.stdin.readlines()
-lines = ('_start: .global _start',
-'mov r0, #1',
-'movlt r1, r0',
-'movs r2, r0, lsl #2',
-'mov r3, #4, lsl #5',
-'add r1, r2, r3',
-'rsb r2, r1, r0, lsl, r5',
-'eor r1, r1, r0',
-'subgt r2, r1, r0, ror, #5',
-'msr spsr_c, r0')
+lines = ('''data:
+str: .asciz "Hello"
+arr: .skip 12
+num: .word 19
+
+_start: 
+mov r0, #1
+cmp r1, r0
+movlt r1, r0
+movs r2, r0, lsl #2 
+and r1, r1, r2
+eorsgt r0, r1, sp
+sub r2, r3, r4
+rsb r5, r2, r0, asr #3
+add r4, r0, #300
+adc r7, r1, r4
+sbc r1, r2, r9
+rsc r0, r2, fp
+tst r0, lr
+teq r2, sp
+cmn r9, #1
+orr r0, r4, r8
+bic r0, r1, r3
+mvn r1, r1''')
+
+lines = split(lines, ('\n'))
 splitter = re.compile(r'([ \t\n,])')
 
 line_number = 0
@@ -313,6 +371,7 @@ for line in lines:
     line_number += 1
 
     line = line.lower()
+    print()
     print(line)
     tokens = splitter.split(line)
     #print(tokens)
@@ -342,7 +401,7 @@ for line in lines:
             break
     else:
         if instruction in ('mrs', 'msr'):
-            msrmrs_processing(instruction, tokens)
+            msrmrs_processing(instruction[:3], tokens)
         else:
             try:
                 other_instructions(instruction, tokens)
