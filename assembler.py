@@ -12,13 +12,13 @@ inst_format = {
     "ldrh_imm" : "000{P}{U}1{W}{L}{Rn}{Rd}{offst1}1{S}{H}1{offst2}",
     "ldrh_reg" : "000{P}{U}0{W}{L}{Rn}{Rd}00001{S}{H}1{Rm}",
     "ldmstm" : "100{P}{U}{S}{W}{L}{Rn}{reglist}",
-    "b" : "101{L}{offset}",
+    "b" : "101{L}{offset:0>24}",
     "bx" : "000100101111111100000001{Rn}",                      # not used. just be processed with "b"
-    "swi" : "1111{swinum}",
+    "swi" : "1111{swinum:0>24}",                                # not used. generates format in function
     "swp" : "00010{B}00{Rn}{Rd}00001001{Rm}",
     "ldcsdc" : "110{P}{U}{N}{W}{L}{Rn}{CRd}{CPNum}{offset}",
-    "coproc" : "1110{op1}{CRn}{CRd}{CPNum}{op2}0{CRm}",         # how..?
-    "mrcmcr" : "1110{op1}{L}{CRn}{CRd}{CPNum}{op2}1{CRm}",
+    "cdp" : "1110{op1}{CRn}{CRd}{CPNum}{op2}0{CRm}",            # how..?
+    "mrcmcr" : "1110{op1}{L}{CRn}{CRd}{CPNum}{op2}1{CRm}",      # how..?
     "msr" : "00010{P}101001111100000000{Rm}",
     "mrs" : "00{I}10{P}10{field}1111{operand2}"
 }
@@ -315,17 +315,30 @@ def msrmrs_processing(inst, toekns: list) -> str:
         if field_str == '':
             field = '1111'
         else:
-            field = ''
-            field += '1' if 'f' in field_str else '0'
-            field += '1' if 's' in field_str else '0'
-            field += '1' if 'x' in field_str else '0'
-            field += '1' if 'c' in field_str else '0'
+            if field_str=='all': 
+                field='1111'
+            else:
+                field = ''
+                for c in ('f', 's', 'x', 'c'):
+                    field += '1' if c in field_str else '0'
+            
         
         binary_code = cond + f'00{I}10{P}10{field}1111{operand2}'
 
     return bin_to_hex(binary_code)
 
 def other_instructions(inst, tokens: list) -> str:
+
+    scon = inst[3:]
+    try:
+        if len(scon) == 2:
+            S = '0'
+            cond = cond_dict[scon]
+        else:
+            S = '1'
+            cond = cond_dict[scon[1:]]
+    except(KeyError):
+        pass
 
     # instruction starts with 'b', must be 'b' 'bl' 'bx' kinds of thing
     # and these guys never has S flag
@@ -389,69 +402,97 @@ def other_instructions(inst, tokens: list) -> str:
         
         binary_code = cond + res.format(B=B, Rn=Rn, Rd=Rd, Rm=Rm)
     
-    elif inst.startswith(''):
-        pass
-    # all cases which includes both S and cond
-    else:
-        S = '0'
-        cond = '1110'
-        
-        #todo : umullsgt is not tokenized by this
-        scon = inst[3:]
-        tmp = len(scon)
+    # no S flag
+    # swi{cond} swi_number
+    elif inst.startswith('swi'):
+        res = inst_format['swi']
+        cond = cond_dict[inst[3:]]
 
-        if tmp == 1:
-            S = '1'
-        elif tmp == 2:
+        num_literal = tokens[1]
+        
+        if num_literal.startswith('0x'):
+            num = int(num_literal[2:], 16)
+        elif num_literal.startswith('0b'):
+            num = int(num_literal[2:], 2)
+        elif num_literal.startswith('0'):
+            num = int(num_literal[1:], 8)
+        else:
+            num = int(num_literal)
+
+        binary_code = cond + '1111' + f'{num:0>24b}'
+
+    # mul{cond}{S} Rd, Rm, Rs
+    # mla{cond}{S} Rd, Rm, Rs, Rn
+    elif inst.startswith('mul') or inst.startswith('mla'):
+        res = inst_format['mul']
+        
+        A = '1' if inst=='mla' else '0'
+
+        Rd = registers[tokens[1]]
+        Rm = registers[tokens[2]]
+        Rs = registers[tokens[3]]
+        try:
+            Rn = registers[tokens[4]]
+        except:
+            Rn = '0000'
+        
+        binary_code = cond + res.format(A=A, S=S, Rd=Rd, Rn=Rn, Rs=Rs, Rm=Rm)
+
+    # <u|s><mul|mla>l{cond}{S} Rd, Rm, Rs, Rn
+    elif inst.startswith('umull') or inst.startswith('smull') or\
+            inst.startswith('umlal') or inst.startswith('smlal'):
+
+        res = inst_format['mull']
+        scon = inst[5:]
+
+        if len(scon) == 2:
+            S = '0'
             cond = cond_dict[scon]
-        elif tmp == 3:
+        else:
             S = '1'
             cond = cond_dict[scon[1:]]
 
-        # mul{cond}{S} Rd, Rm, Rs
-        # mla{cond}{S} Rd, Rm, Rs, Rn
-        if inst=='mul' or inst=='mla':
-            res = inst_format['mul']
-            
-            A = '1' if inst=='mla' else '0'
-
-            Rd = registers[tokens[1]]
-            Rm = registers[tokens[2]]
-            Rs = registers[tokens[3]]
-            try:
-                Rn = registers[tokens[4]]
-            except:
-                Rn = '0000'
-            
-            binary_code = cond + res.format(A=A, S=S, Rd=Rd, Rn=Rn, Rs=Rs, Rm=Rm)
-            
-
-        elif inst=='umull' or inst=='smull':
-            res = inst_format['mull']
-            
-
-        elif inst=='ldr' or inst=='str' or inst=='ldrb' or inst=='strb':
-            res = inst_format["ldrstr"]
-            pass
-
-        elif inst=='ldrh' or inst=='strh':
-            pass
-
-        elif inst=='ldm' or inst=='stm':
-            res = inst_format['ldmstm']
-
-        elif inst=='swi':
-            res = inst_format['swi']
-
-        elif inst=='ldc' or inst=='sdc':
-            res = inst_format['ldcsdc']
-
-        elif inst=='mrc' or inst=='mcr':
-            res = inst_format['mrcmcr']
+        U = '1' if inst.startswith('u') else '0'
+        A = '1' if ('mla' in inst) else '0'
         
-        # mul, bx, swi, swp
-        else:
-            res = inst_format[inst]
+        RdLo = tokens[1]
+        RdHi = tokens[2]
+        Rm = tokens[3]
+        Rs = tokens[4]
+
+        binary_code = cond + res.format(U=U, A=A, S=S, RdHi=RdHi, RdLo=RdLo, Rs=Rs, Rm=Rm)
+
+    #todo
+    # <ldr|str>{cond}{B}{T} Rd, <Address>
+    elif inst.startswith('ldr') or inst.startswith('str'):
+        res = inst_format['ldrstr']
+        pass
+
+    #todo
+    elif inst.startswith('ldrh') or inst.startswith('strh'):
+        res = inst_format['ldrh_imm']
+        res = inst_format['ldrh_reg']
+        pass
+
+    #todo
+    elif inst.startswith('ldm') or inst.startswith('stm'):
+        res = inst_format['ldmstm']
+        pass
+
+    #todo
+    # <ldc|sdc>{cond}{L} p#, cd, <Address>
+    elif inst.startswith('ldc') or inst.startswith('sdc'):
+        res = inst_format['ldcsdc']
+        pass
+        
+    # what...
+    elif inst.startswith('cdp'):
+        raise Exception('cannot handle instruction : cdp')
+    
+    # whaaat.....
+    elif inst.startswith('mrc') or inst.startswith('mcr'):
+        res = inst_format['mrcmcr']
+        raise Exception('cannot handle instruction : mrc & mcr')
     
     return bin_to_hex(binary_code)
 
@@ -546,8 +587,3 @@ for line in lines:
                 other_instructions(instruction, tokens)
             except:
                 raise SyntaxErrorException('instruction not found', line_number)
-
-    
-
-
-    
