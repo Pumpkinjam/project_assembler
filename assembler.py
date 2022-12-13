@@ -71,8 +71,7 @@ imm_to_binary("#0xff", 10)  => '0011111111'
 '''
 def imm_to_binary(literal: str, length: int = 0, ignore_sign: bool = False) -> str:
     if literal[0] != '#':   # will not be happened. maybe...
-        print('expected \'#\' for immediate value.')
-        raise Exception()
+        literal = '#' + literal
     
     neg = False
     if literal[1] == '-':
@@ -170,6 +169,7 @@ def data_processing(opcode, tokens: list) -> str:
     except:
         pass
 
+    operand2 = '0'*12
     tmp = tokens[0].replace(opcode, '')
 
     # special case : mrs
@@ -352,6 +352,7 @@ def other_instructions(inst, tokens: list) -> str:
 
     # instruction starts with 'b', must be 'b' 'bl' 'bx' kinds of thing
     # and these guys never has S flag
+    # todo : offset must be pc-relative
     if inst.startswith('b'):
         tmp = len(inst)
         res = inst_format['b']
@@ -419,8 +420,9 @@ def other_instructions(inst, tokens: list) -> str:
         cond = cond_dict[inst[3:]]
 
         num_literal = tokens[1]
-        
-        if num_literal.startswith('0x'):
+        if num_literal == '0':
+            num = 0
+        elif num_literal.startswith('0x'):
             num = int(num_literal[2:], 16)
         elif num_literal.startswith('0b'):
             num = int(num_literal[2:], 2)
@@ -465,10 +467,10 @@ def other_instructions(inst, tokens: list) -> str:
         U = '1' if inst.startswith('u') else '0'
         A = '1' if ('mla' in inst) else '0'
         
-        RdLo = tokens[1]
-        RdHi = tokens[2]
-        Rm = tokens[3]
-        Rs = tokens[4]
+        RdLo = registers[tokens[1]]
+        RdHi = registers[tokens[2]]
+        Rm = registers[tokens[3]]
+        Rs = registers[tokens[4]]
 
         binary_code = cond + res.format(U=U, A=A, S=S, RdHi=RdHi, RdLo=RdLo, Rs=Rs, Rm=Rm)
 
@@ -532,9 +534,7 @@ def other_instructions(inst, tokens: list) -> str:
         # todo
         binary_code = cond + res.format(I=I, P=P, U=U, B=B, W=W, L=L, Rn=Rn, Rd=Rd, offset=offset)
         
-
-
-    #todo
+    # <ldr>{h|sb|sh}{cond} Rd, <Address>
     elif inst.startswith('ldrh') or inst.startswith('strh'):
         res = inst_format['ldrh_imm']
         res = inst_format['ldrh_reg']
@@ -579,14 +579,16 @@ def trim(tokens: list, target: tuple) -> list:
 
 ### main() starts here ###
     
-#lines = sys.stdin.readlines()
+lines = sys.stdin.readlines()
+"""
 lines = ('''data:
 str: .asciz "Hello"
 arr: .skip 12
 num: .word 19
 
-_start: 
-mov r0, #1
+_start:
+@ data processing
+mov r0, #1      @ comment
 cmp r1, r0
 movlt r1, r0
 movs r2, r0, lsl #2 
@@ -603,15 +605,29 @@ teq r2, sp
 cmn r9, #1
 orr r0, r4, r8
 bic r0, r1, r3
-mvn r1, r1''')
+mvn r1, r1
 
-lines = ('''
+@ mul
+mul r1, r2, r3
+umull r1, r2, r3, r4
+smullgt r2, r3, r4, r5
+
+@ load/store
 ldrlt r0, [r1]
 ldrb r1, [r2, #3]
 ldr r3, [r4, -r5, lsl #3]!
 streq r0, [r2], #4
 strb r2, [r3], -r4, asr #5
+
+@ branch
+b 0x1111
+bx r3
+bl 0x3434
+
+@ swi
+swi 0
 ''')
+"""
 
 lines = split(lines, ('\n'))
 splitter = re.compile(r'([ \t\n,])')
@@ -621,6 +637,7 @@ line_number = 0
 for line in lines:
     line_number += 1
 
+
     line = line.lower()
     print()
     print(line)
@@ -628,9 +645,19 @@ for line in lines:
     #print(tokens)
     #tokens = [tok for tok in tokens
     #          if re.match('\s*$', tok) == None]
-    tokens = trim(tokens, ('', ' ', ',', '@')) # ex) ['add', 'r0', 'r1', 'r2', 'lsl', '#5']
-    #print(tokens)
+    tokens = trim(tokens, ('', ' ', ',')) # ex) ['add', 'r0', 'r1', 'r2', 'lsl', '#5']
+    
+    tmp = []
+    for i in range(len(tokens)):
+        if '@' in tokens[i]:
+            before_cra = tokens[i][:tokens[i].index('@')]
+            if before_cra != '': tmp.append(before_cra)
+            break
+        tmp.append(tokens[i])
+    
+    tokens = tmp
 
+    if len(tokens) < 1: continue
 
     while len(tokens) > 0:
         if tokens[0].endswith(':'): # process label
@@ -644,6 +671,7 @@ for line in lines:
             continue
         else: break # process instruction
     else: continue  # no instruction after, or an empty line
+
 
     instruction = tokens[0]
 
