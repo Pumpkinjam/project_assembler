@@ -16,7 +16,7 @@ inst_format = {
     "bx" : "000100101111111100000001{Rn}",                      # not used. just be processed with "b"
     "swi" : "1111{swinum:0>24}",                                # not used. generates format in function
     "swp" : "00010{B}00{Rn}{Rd}00001001{Rm}",
-    "ldcsdc" : "110{P}{U}{N}{W}{L}{Rn}{CRd}{CPNum}{offset}",
+    "ldcsdc" : "110{P}{U}{N}{W}{L}{Rn}{CRd}{CPNum}{offset}",    # how..?
     "cdp" : "1110{op1}{CRn}{CRd}{CPNum}{op2}0{CRm}",            # how..?
     "mrcmcr" : "1110{op1}{L}{CRn}{CRd}{CPNum}{op2}1{CRm}",      # how..?
     "msr" : "00010{P}101001111100000000{Rm}",
@@ -462,11 +462,46 @@ def other_instructions(inst, tokens: list) -> str:
 
         binary_code = cond + res.format(U=U, A=A, S=S, RdHi=RdHi, RdLo=RdLo, Rs=Rs, Rm=Rm)
 
-    #todo
-    # <ldr|str>{cond}{B}{T} Rd, <Address>
+    # <ldr|str>{B}{cond} Rd, <Address>
     elif inst.startswith('ldr') or inst.startswith('str'):
         res = inst_format['ldrstr']
-        pass
+        
+        B = S
+        # we already have cond
+        
+        Rd = tokens[1]
+        
+        index_tokens = []   # replace the index tokens to list
+        
+        index_tokens.append(tokens[2][1:])  # remove opening bracket
+        tokens.pop(2)
+        while ']' not in index_tokens[-1]:
+            index_tokens.append(tokens[2])
+            tokens.pop(2)
+        tmp = index_tokens[-1]
+
+        # remove closing bracket
+        if tmp[-1] == '!':
+            W = '1'
+            index_tokens[-1] = tmp[:-2]
+        else:
+            W = '0'
+            index_tokens[-1] = tmp[:-1]    
+
+        tokens.insert(2, index_tokens)
+        print(f'debug : {tokens}')
+        
+        Rn = index_tokens[0]
+
+        if len(tokens) == 3:
+            P = 1
+        else: 
+            P = 0
+
+        # todo
+        binary_code = '0' * 32
+        
+
 
     #todo
     elif inst.startswith('ldrh') or inst.startswith('strh'):
@@ -479,11 +514,9 @@ def other_instructions(inst, tokens: list) -> str:
         res = inst_format['ldmstm']
         pass
 
-    #todo
     # <ldc|sdc>{cond}{L} p#, cd, <Address>
     elif inst.startswith('ldc') or inst.startswith('sdc'):
-        res = inst_format['ldcsdc']
-        pass
+        raise Exception('cannot handle instruction : ldc/sdc')
         
     # what...
     elif inst.startswith('cdp'):
@@ -541,6 +574,14 @@ orr r0, r4, r8
 bic r0, r1, r3
 mvn r1, r1''')
 
+lines = ('''
+ldr r0, [r1]
+ldr r1, [r2, #3]
+ldr r3, [r4, -r5, lsl #3]!
+str r0, [r2], #4
+str r2, [r3], -r4, asr #5
+''')
+
 lines = split(lines, ('\n'))
 splitter = re.compile(r'([ \t\n,])')
 
@@ -583,7 +624,9 @@ for line in lines:
         if instruction in ('mrs', 'msr'):
             msrmrs_processing(instruction[:3], tokens)
         else:
+            """
             try:
                 other_instructions(instruction, tokens)
             except:
-                raise SyntaxErrorException('instruction not found', line_number)
+                raise SyntaxErrorException('instruction not found', line_number)"""
+            other_instructions(instruction, tokens)
