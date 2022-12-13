@@ -69,10 +69,15 @@ imm_to_binary("#12", 0)     => '1100'
 imm_to_binary("#3", 1)      => '11'
 imm_to_binary("#0xff", 10)  => '0011111111'
 '''
-def imm_to_binary(literal: str, length: int = 0):
+def imm_to_binary(literal: str, length: int = 0, ignore_sign: bool = False) -> str:
     if literal[0] != '#':   # will not be happened. maybe...
         print('expected \'#\' for immediate value.')
         raise Exception()
+    
+    neg = False
+    if literal[1] == '-':
+        neg = True
+        literal = '#' + literal[2:]
     
     if (literal.startswith('#0x')):
         res = f'{bin( int( literal[3:], 16))[2:]}'
@@ -85,7 +90,7 @@ def imm_to_binary(literal: str, length: int = 0):
 
     res = '0' * (length-len(res)) + res
     
-    return res
+    return res if (not neg or ignore_sign) else '-' + res
 
 '''
 #123    -> 123
@@ -110,6 +115,34 @@ def imm_to_operand2(literal: str) -> str:
     
     
     return operand2
+
+def shift_to_operand2(tokens: list) -> str:
+    Rm = registers[tokens[0]]
+
+    # case : no barrel shift
+    if len(tokens) == 1: 
+        operand2 = f'00000000{Rm}'
+    else:
+        if tokens[1] == 'rrx':
+            operand2 = f'00000110{Rm}'
+
+        else:
+            shift_dict = {
+                'lsl' : '00',
+                'lsr' : '01',
+                'asr' : '10',
+                'ror' : '11'
+            }
+            shift_inst = tokens[1] # lsl, lsr, asr, ror
+            shift = shift_dict[shift_inst]
+
+            if tokens[2].startswith('#'):
+                operand2 = f'{bin(int(tokens[2][1:]))[2:]:0>5}{shift}0{Rm}'
+
+            else:
+                operand2 = f'{registers[tokens[2]]}0{shift}1{Rm}'
+        
+        return operand2
 
 def bit4_to_hex(bits: str) -> str:
     bits = f'{bits:0>4}'
@@ -239,30 +272,7 @@ def data_processing(opcode, tokens: list) -> str:
 
         else:
             I = '0'
-            Rm = registers[op2_tokens[0]]
-
-            # case : no barrel shift
-            if len(op2_tokens) == 1: 
-                operand2 = f'00000000{Rm}'
-            else:
-                if op2_tokens[1] == 'rrx':
-                    operand2 = f'00000110{Rm}'
-
-                else:
-                    shift_dict = {
-                        'lsl' : '00',
-                        'lsr' : '01',
-                        'asr' : '10',
-                        'ror' : '11'
-                    }
-                    shift_inst = op2_tokens[1] # lsl, lsr, asr, ror
-                    shift = shift_dict[shift_inst]
-
-                    if op2_tokens[2].startswith('#'):
-                        operand2 = f'{bin(int(op2_tokens[2][1:]))[2:]:0>5}{shift}0{Rm}'
-
-                    else:
-                        operand2 = f'{registers[op2_tokens[2]]}0{shift}1{Rm}'
+            shift_to_operand2(op2_tokens)
 
         print(f'I = {I} / opcode = {opcode} / S = {S} / Rn = {Rn} / Rd = {Rd} / operand2 = {operand2}')
         binary_code = cond + inst_format['dp'].format(I=I, opcode=opcode_dict[opcode], S=S, Rn=Rn, Rd=Rd, operand2=operand2)
@@ -466,10 +476,11 @@ def other_instructions(inst, tokens: list) -> str:
     elif inst.startswith('ldr') or inst.startswith('str'):
         res = inst_format['ldrstr']
         
-        B = S
+        L = '1' if inst[0] == 'l' else '0'
+        B = '1' if inst[-1] == 'b' else '0'
         # we already have cond
         
-        Rd = tokens[1]
+        Rd = registers[tokens[1]]
         
         index_tokens = []   # replace the index tokens to list
         
@@ -491,15 +502,35 @@ def other_instructions(inst, tokens: list) -> str:
         tokens.insert(2, index_tokens)
         print(f'debug : {tokens}')
         
-        Rn = index_tokens[0]
+        Rn = registers[index_tokens[0]]
 
-        if len(tokens) == 3:
-            P = 1
-        else: 
-            P = 0
+        I = '0'
+        P = '1'
+        U = '1'
 
+        # merge cases of pre/post-indexed
+        if len(tokens) > 3:     # case of post-indexed
+            P = '0'
+            index_tokens = tokens[2:]
+        
+        if len(index_tokens) == 1:  # no offset
+            offset = '0' * 12
+
+        else:                       # offset
+            if index_tokens[1].startswith('#'):   # immediate offset
+                if index_tokens[1][1] == '-':
+                    U = '0'
+                    index_tokens[1] = '#' + index_tokens[1][2:]
+                offset = imm_to_binary(index_tokens[1], 12, ignore_sign=True)
+            else:
+                I = '1'
+                if index_tokens[1][0] == '-':
+                    U = '0'
+                    index_tokens[1] = index_tokens[1][1:]
+                offset = shift_to_operand2(index_tokens[1:])
+        
         # todo
-        binary_code = '0' * 32
+        binary_code = cond + res.format(I=I, P=P, U=U, B=B, W=W, L=L, Rn=Rn, Rd=Rd, offset=offset)
         
 
 
@@ -575,11 +606,11 @@ bic r0, r1, r3
 mvn r1, r1''')
 
 lines = ('''
-ldr r0, [r1]
-ldr r1, [r2, #3]
+ldrlt r0, [r1]
+ldrb r1, [r2, #3]
 ldr r3, [r4, -r5, lsl #3]!
-str r0, [r2], #4
-str r2, [r3], -r4, asr #5
+streq r0, [r2], #4
+strb r2, [r3], -r4, asr #5
 ''')
 
 lines = split(lines, ('\n'))
