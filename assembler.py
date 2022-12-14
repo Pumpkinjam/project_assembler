@@ -65,6 +65,24 @@ def rotate_left(binary: str, rot: int):
     return rotate_right(binary, 32-rot)
 
 '''
+complement_two("1111")      => '0001'
+complement_two("100100")    => '011100'
+'''
+def complement_two(binary: str):
+    res = ''
+    for i in range(len(binary)):
+        res += '1' if binary[i] == '0' else '0'
+    
+    tmp = ''
+    for i in range(len(res)-1, -1, -1):
+        if res[i] == '0':
+            tmp = '1' + tmp
+            break
+        else:
+            tmp = '0' + tmp
+    
+    return res[:i] + tmp
+'''
 imm_to_binary("#12", 0)     => '1100'
 imm_to_binary("#3", 1)      => '11'
 imm_to_binary("#0xff", 10)  => '0011111111'
@@ -89,7 +107,7 @@ def imm_to_binary(literal: str, length: int = 0, ignore_sign: bool = False) -> s
 
     res = '0' * (length-len(res)) + res
     
-    return res if (not neg or ignore_sign) else '-' + res
+    return res if (not neg or ignore_sign) else complement_two(res)
 
 '''
 #123    -> 123
@@ -160,7 +178,7 @@ def bin_to_hex(binary_code: str) -> str:
 
     return hex_code
 
-def data_processing(opcode, tokens: list) -> str:
+def data_processing(opcode, tokens: list, line_number: int) -> str:
 
     # remove ',' in the tokens
     try:
@@ -178,7 +196,7 @@ def data_processing(opcode, tokens: list) -> str:
         cond = cond_dict[tmp]
         Rm = tokens[1]
         P = '0' if tokens[2] == 'cpsr' else '1' if tokens[2] == 'spsr' else '-'
-        if P == '-': raise SyntaxErrorException('neither cpsr nor spsr')
+        if P == '-': raise SyntaxErrorException('neither cpsr nor spsr', line_number)
 
         binary_code = cond + f'00010{P}101001111100000000{Rm}'
     
@@ -202,7 +220,7 @@ def data_processing(opcode, tokens: list) -> str:
         elif psr.startswith('spsr'):
             P = '1'
         else:
-            raise SyntaxErrorException('neither cpsr nor spsr')
+            raise SyntaxErrorException('neither cpsr nor spsr', line_number)
         
         field_str = psr[5:]
         if field_str == '':
@@ -230,20 +248,20 @@ def data_processing(opcode, tokens: list) -> str:
         elif l==1:    # check s flag
             if tmp=='s':
                 S = '1'
-            else: raise SyntaxErrorException('Invalid mnemonic')
+            else: raise SyntaxErrorException('Invalid mnemonic', line_number)
 
         elif l==2:  # check condition
             if tmp in cond_dict:
                 cond = cond_dict[tmp]
-            else: raise SyntaxErrorException('Invalid mnemonic')
+            else: raise SyntaxErrorException('Invalid mnemonic', line_number)
 
         elif l==3:  # check both
             if tmp[0] != 's' or tmp[1:] not in cond_dict: 
-                raise SyntaxErrorException('Invalid mnemonic')
+                raise SyntaxErrorException('Invalid mnemonic', line_number)
             S = '1'
             cond = cond_dict[tmp[1:]]
 
-        else: raise SyntaxErrorException('Invalid mnemonic')
+        else: raise SyntaxErrorException('Invalid mnemonic', line_number)
 
 
         Rd = registers[tokens[1]]
@@ -263,7 +281,7 @@ def data_processing(opcode, tokens: list) -> str:
 
         # no operand exception (missing Rm or imm)
         if (op2_tokens == []):
-            raise SyntaxErrorException('missing operand')
+            raise SyntaxErrorException('missing operand', line_number)
 
         # check immediate value
         if op2_tokens[0].startswith('#'):
@@ -279,7 +297,7 @@ def data_processing(opcode, tokens: list) -> str:
             
     return bin_to_hex(binary_code)
 
-def msrmrs_processing(inst, toekns: list) -> str:
+def msrmrs_processing(inst, toekns: list, line_number: int) -> str:
     # remove ',' in the tokens
     try:
         while True:
@@ -295,7 +313,7 @@ def msrmrs_processing(inst, toekns: list) -> str:
         cond = cond_dict[tmp]
         Rm = registers[Rm]
         P = '0' if tokens[2] == 'cpsr' else '1' if tokens[2] == 'spsr' else '-'
-        if P == '-': raise SyntaxErrorException('neither cpsr nor spsr')
+        if P == '-': raise SyntaxErrorException('neither cpsr nor spsr', line_number)
 
         binary_code = cond + f'00010{P}101001111100000000{Rm}'
     
@@ -319,7 +337,7 @@ def msrmrs_processing(inst, toekns: list) -> str:
         elif psr.startswith('spsr'):
             P = '1'
         else:
-            raise SyntaxErrorException('neither cpsr nor spsr')
+            raise SyntaxErrorException('neither cpsr nor spsr', line_number)
         
         field_str = psr[5:]
         if field_str == '':
@@ -337,7 +355,7 @@ def msrmrs_processing(inst, toekns: list) -> str:
 
     return bin_to_hex(binary_code)
 
-def other_instructions(inst, tokens: list) -> str:
+def other_instructions(inst, tokens: list, line_number: int) -> str:
 
     scon = inst[3:]
     try:
@@ -383,10 +401,19 @@ def other_instructions(inst, tokens: list) -> str:
             raise SyntaxErrorException('Invalid mnemonic')
 
         
-        if inst=='bx':
+        if inst=='bx':  # bx gets register
             offset = f'00101111111100000001{registers[tokens[1]]}'
-        else:
-            offset = imm_to_binary(tokens[1], 24)
+        else:           # b, bl gets immediate value or label
+            if tokens[1][0].isnumeric(): 
+                offset = imm_to_binary(tokens[1], 24)
+            else:
+                try: label_address = symbol_table[tokens[1]]
+                except NameError: raise SyntaxErrorException('Unknown label', line_number)
+
+                current_address = 0x8080 + (line_number * 4) - start_offset + 8
+                offset = imm_to_binary(str((label_address - current_address)//4), 24)
+
+                
 
         binary_code = cond + res.format(L=L, offset=offset)
 
@@ -558,7 +585,8 @@ def other_instructions(inst, tokens: list) -> str:
         res = inst_format['mrcmcr']
         raise Exception('cannot handle instruction : mrc & mcr')
     
-    return bin_to_hex(binary_code)
+    try: return bin_to_hex(binary_code)
+    except NameError: SyntaxErrorException('invalid instruction', line_number)
 
 
 def split(line: str, target: tuple) -> list:
@@ -579,8 +607,8 @@ def trim(tokens: list, target: tuple) -> list:
 
 ### main() starts here ###
     
-lines = sys.stdin.readlines()
-"""
+#lines = sys.stdin.readlines()
+
 lines = ('''data:
 str: .asciz "Hello"
 arr: .skip 12
@@ -620,23 +648,87 @@ streq r0, [r2], #4
 strb r2, [r3], -r4, asr #5
 
 @ branch
-b 0x1111
-bx r3
-bl 0x3434
+mov r0, #1
+lab: add r0, r0, #1
+cmp r0, #3
+beq lab
 
 @ swi
 swi 0
 ''')
-"""
+
 
 lines = split(lines, ('\n'))
 splitter = re.compile(r'([ \t\n,])')
 
+
+# first pass
 line_number = 0
-   
+starting_address = 0x8080
+symbol_table = {}
+
 for line in lines:
     line_number += 1
 
+    line = line.lower()
+    print()
+    print(line)
+    tokens = splitter.split(line)
+
+    tokens = trim(tokens, ('', ' ', ',')) # ex) ['lab:', 'mov', 'r1', 'r2', '@', 'my_comment']
+    
+    tmp = []
+    for i in range(len(tokens)):
+        if '@' in tokens[i]:
+            before_cra = tokens[i][:tokens[i].index('@')]
+            if before_cra != '': tmp.append(before_cra)
+            break
+        tmp.append(tokens[i])
+    
+    tokens = tmp
+
+    if len(tokens) < 1: continue
+
+    while len(tokens) > 0:
+        if tokens[0].endswith(':'): # process label
+            label_name =  tokens[0].rstrip(':')
+            print('\tLABEL ' + label_name + ' FOUND')
+            if label_name in symbol_table:
+                raise SyntaxErrorException('label repetition detected.', line_number)
+
+            symbol_table[label_name] = starting_address + (line_number * 4)
+            tokens = tokens[1:]
+            # todo
+            continue
+
+        elif tokens[0].startswith('.'): # process directive
+            print('\tDIRECTIVE ' + tokens[0] + ' FOUND')
+            tokens = tokens[1:]
+            while len(tokens) > 0: del tokens[0]
+            continue
+
+        else: break # process instruction
+    else: continue  # no instruction after, or an empty line
+
+
+try: start_offset = symbol_table['_start'] - 0x8080
+except: raise SyntaxErrorException('"_start" label not found.')
+
+start_line = start_offset // 4
+for i in symbol_table.keys():
+    symbol_table[i] -= start_offset
+
+print("Symbol Table")
+for label, address in symbol_table.items():
+    print(f'{label} : 0x{address:x}')
+
+
+# second pass    
+line_number = 0
+inst_pointer = 0x8080
+for line in lines:
+    line_number += 1
+    if line_number < start_line: continue   # start assembling from _start label
 
     line = line.lower()
     print()
@@ -677,15 +769,10 @@ for line in lines:
 
     for target in opcode_dict:
         if target in instruction:
-            data_processing(target, tokens)
+            data_processing(target, tokens, line_number)
             break
     else:
         if instruction in ('mrs', 'msr'):
-            msrmrs_processing(instruction[:3], tokens)
+            msrmrs_processing(instruction[:3], tokens, line_number)
         else:
-            """
-            try:
-                other_instructions(instruction, tokens)
-            except:
-                raise SyntaxErrorException('instruction not found', line_number)"""
-            other_instructions(instruction, tokens)
+            other_instructions(instruction, tokens, line_number)

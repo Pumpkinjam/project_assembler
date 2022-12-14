@@ -1,11 +1,11 @@
-data: 
+data:
 str: .asciz "Hello"
 arr: .skip 12
 num: .word 19
 
-_start: 
+_start:
 @ data processing
-mov r0, #1
+mov r0, #1      @ comment
 cmp r1, r0
 movlt r1, r0
 movs r2, r0, lsl #2 
@@ -37,9 +37,10 @@ streq r0, [r2], #4
 strb r2, [r3], -r4, asr #5
 
 @ branch
-b 0x1111
-bx r3
-bl 0x3434
+mov r0, #1
+lab: add r0, r0, #1
+cmp r0, #3
+beq lab
 
 @ swi
 swi 0
