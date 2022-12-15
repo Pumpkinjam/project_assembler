@@ -295,7 +295,7 @@ def data_processing(opcode, tokens: list, line_number: int) -> str:
             I = '0'
             shift_to_operand2(op2_tokens)
 
-        print(f'I = {I} / opcode = {opcode} / S = {S} / Rn = {Rn} / Rd = {Rd} / operand2 = {operand2}')
+#        print(f'I = {I} / opcode = {opcode} / S = {S} / Rn = {Rn} / Rd = {Rd} / operand2 = {operand2}')
         binary_code = cond + inst_format['dp'].format(I=I, opcode=opcode_dict[opcode], S=S, Rn=Rn, Rd=Rd, operand2=operand2)
             
     return bin_to_hex(binary_code)
@@ -536,7 +536,7 @@ def other_instructions(inst, tokens: list, line_number: int) -> str:
                 index_tokens[-1] = tmp[:-1]    
 
             tokens.insert(2, index_tokens)
-            print(f'debug : {tokens}')
+#            print(f'debug : {tokens}')
             
             Rn = registers[index_tokens[0]]
 
@@ -667,11 +667,11 @@ swi 0
 ''')
 """
 
-
 lines = split(lines, ('\n'))
+
 splitter = re.compile(r'([ \t\n,])')
 
-
+if type(lines[0]) is list: lines = sum(lines, [])  # flatten the list
 # first pass
 line_number = 0
 starting_address = 0x8080
@@ -679,10 +679,9 @@ symbol_table = {}
 
 for line in lines:
     line_number += 1
-
+	
     line = line.lower()
-    print()
-    print(line)
+#    print(line)
     tokens = splitter.split(line)
 
     tokens = trim(tokens, ('', ' ', ',')) # ex) ['lab:', 'mov', 'r1', 'r2', '@', 'my_comment']
@@ -708,7 +707,6 @@ for line in lines:
 
             symbol_table[label_name] = starting_address + (line_number * 4)
             tokens = tokens[1:]
-            # todo
             continue
 
         elif tokens[0].startswith('.'): # process directive
@@ -747,7 +745,7 @@ for line in lines:
     #print(tokens)
     #tokens = [tok for tok in tokens
     #          if re.match('\s*$', tok) == None]
-    tokens = trim(tokens, ('', ' ', ',')) # ex) ['add', 'r0', 'r1', 'r2', 'lsl', '#5']
+    tokens = trim(tokens, ('', ' ', ',', '\n')) # ex) ['add', 'r0', 'r1', 'r2', 'lsl', '#5']
     
     tmp = []
     for i in range(len(tokens)):
@@ -758,23 +756,19 @@ for line in lines:
         tmp.append(tokens[i])
     
     tokens = tmp
-
     if len(tokens) < 1: continue
-
     while len(tokens) > 0:
         if tokens[0].endswith(':'): # process label
-            print('\tLABEL ' + tokens[0].rstrip(':') + ' FOUND')
             tokens = tokens[1:]
             continue
+
         elif tokens[0].startswith('.'): # process directive
-            print('\tDIRECTIVE ' + tokens[0] + ' FOUND')
             tokens = tokens[1:]
             while len(tokens) > 0: del tokens[0]
             continue
+
         else: break # process instruction
     else: continue  # no instruction after, or an empty line
-
-
     instruction = tokens[0]
 
     for target in opcode_dict:
