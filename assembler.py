@@ -82,10 +82,13 @@ def complement_two(binary: str):
             tmp = '0' + tmp
     
     return res[:i] + tmp
+
 '''
 imm_to_binary("#12", 0)     => '1100'
 imm_to_binary("#3", 1)      => '11'
 imm_to_binary("#0xff", 10)  => '0011111111'
+imm_to_binary("#-10")       => '0110'
+imm_to_binary("#-0xff", ignore_sign = True) => '11111111'
 '''
 def imm_to_binary(literal: str, length: int = 0, ignore_sign: bool = False) -> str:
     if literal[0] != '#':   # will not be happened. maybe...
@@ -512,51 +515,55 @@ def other_instructions(inst, tokens: list, line_number: int) -> str:
         Rd = registers[tokens[1]]
         
         index_tokens = []   # replace the index tokens to list
+
         
-        index_tokens.append(tokens[2][1:])  # remove opening bracket
-        tokens.pop(2)
-        while ']' not in index_tokens[-1]:
-            index_tokens.append(tokens[2])
+        if tokens[2][0] == '=': # ldr = format
+            pass #todo
+        else:                   # ldr [] format
+            index_tokens.append(tokens[2][1:])  # remove opening bracket
             tokens.pop(2)
-        tmp = index_tokens[-1]
+            while ']' not in index_tokens[-1]:
+                index_tokens.append(tokens[2])
+                tokens.pop(2)
+            tmp = index_tokens[-1]
 
-        # remove closing bracket
-        if tmp[-1] == '!':
-            W = '1'
-            index_tokens[-1] = tmp[:-2]
-        else:
-            W = '0'
-            index_tokens[-1] = tmp[:-1]    
-
-        tokens.insert(2, index_tokens)
-        print(f'debug : {tokens}')
-        
-        Rn = registers[index_tokens[0]]
-
-        I = '0'
-        P = '1'
-        U = '1'
-
-        # merge cases of pre/post-indexed
-        if len(tokens) > 3:     # case of post-indexed
-            P = '0'
-            index_tokens = tokens[2:]
-        
-        if len(index_tokens) == 1:  # no offset
-            offset = '0' * 12
-
-        else:                       # offset
-            if index_tokens[1].startswith('#'):   # immediate offset
-                if index_tokens[1][1] == '-':
-                    U = '0'
-                    index_tokens[1] = '#' + index_tokens[1][2:]
-                offset = imm_to_binary(index_tokens[1], 12, ignore_sign=True)
+            # remove closing bracket
+            if tmp[-1] == '!':
+                W = '1'
+                index_tokens[-1] = tmp[:-2]
             else:
-                I = '1'
-                if index_tokens[1][0] == '-':
-                    U = '0'
-                    index_tokens[1] = index_tokens[1][1:]
-                offset = shift_to_operand2(index_tokens[1:])
+                W = '0'
+                index_tokens[-1] = tmp[:-1]    
+
+            tokens.insert(2, index_tokens)
+            print(f'debug : {tokens}')
+            
+            Rn = registers[index_tokens[0]]
+
+            I = '0'
+            P = '1'
+            U = '1'
+
+            # merge cases of pre/post-indexed
+            if len(tokens) > 3:     # case of post-indexed
+                P = '0'
+                index_tokens = tokens[2:]
+            
+            if len(index_tokens) == 1:  # no offset
+                offset = '0' * 12
+
+            else:                       # offset
+                if index_tokens[1].startswith('#'):   # immediate offset
+                    if index_tokens[1][1] == '-':
+                        U = '0'
+                        index_tokens[1] = '#' + index_tokens[1][2:]
+                    offset = imm_to_binary(index_tokens[1], 12, ignore_sign=True)
+                else:
+                    I = '1'
+                    if index_tokens[1][0] == '-':
+                        U = '0'
+                        index_tokens[1] = index_tokens[1][1:]
+                    offset = shift_to_operand2(index_tokens[1:])
         
         # todo
         binary_code = cond + res.format(I=I, P=P, U=U, B=B, W=W, L=L, Rn=Rn, Rd=Rd, offset=offset)
@@ -607,8 +614,10 @@ def trim(tokens: list, target: tuple) -> list:
 
 ### main() starts here ###
     
-#lines = sys.stdin.readlines()
+lines = sys.stdin.readlines()
 
+# test code without stdin
+"""
 lines = ('''data:
 str: .asciz "Hello"
 arr: .skip 12
@@ -656,6 +665,7 @@ beq lab
 @ swi
 swi 0
 ''')
+"""
 
 
 lines = split(lines, ('\n'))
