@@ -113,10 +113,10 @@ def imm_to_binary(literal: str, length: int = 0, ignore_sign: bool = False) -> s
     return res if (not neg or ignore_sign) else complement_two(res)
 
 '''
-#123    -> 123
-#0b1111 -> 15
-#0xff   -> 255
-#024    -> 20
+#123    -> 000001111011
+#0b1111 -> 000000001111
+#0xff   -> 000011111111
+#024    -> 000000010100
 
 also considering rot
 '''
